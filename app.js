@@ -454,12 +454,7 @@ function renderNav(active) {
 function mountShell(active) {
   var app = document.getElementById("app");
   if (!app) return;
-  if (!document.getElementById("shell-header")) {
-    app.innerHTML = mountShellHtml(active);
-  } else {
-    // update active nav + balance/profile
-    app.innerHTML = mountShellHtml(active);
-  }
+  app.innerHTML = mountShellHtml(active);
 }
 
 function mountShellHtml(active) {
@@ -531,53 +526,3 @@ function getNavLinks() {
     { href: pageUrl("settings.html"), label: "Me", icon: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>', roles: ["ruler", "superadmin", "reseller"] },
   ];
 }
-
-// ✅ Global Event Delegation for dynamic buttons
-document.addEventListener('click', function(e) {
-  // Delete button
-  if (e.target.closest('[data-action="delete"]')) {
-    e.preventDefault();
-    var btn = e.target.closest('[data-action="delete"]');
-    var id = btn.getAttribute('data-id');
-    var endpoint = btn.getAttribute('data-endpoint') || '/keys/' + id;
-    if (confirm('Are you sure you want to delete this item?')) {
-      api(endpoint, { method: 'DELETE' })
-        .then(function() {
-          showToast('Deleted successfully');
-          if (typeof loadData === 'function') loadData();
-          var row = btn.closest('tr, .card, .item');
-          if (row) row.remove();
-        })
-        .catch(function(err) {
-          showToast(err.message || 'Delete failed', 'error');
-        });
-    }
-  }
-  
-  // Edit/Pencil button
-  if (e.target.closest('[data-action="edit"]')) {
-    e.preventDefault();
-    var btn = e.target.closest('[data-action="edit"]');
-    var id = btn.getAttribute('data-id');
-    var endpoint = btn.getAttribute('data-endpoint') || '/keys/' + id;
-    if (endpoint) {
-      window.location.href = endpoint;
-    }
-  }
-  
-  // Disable button
-  if (e.target.closest('[data-action="disable"]')) {
-    e.preventDefault();
-    var btn = e.target.closest('[data-action="disable"]');
-    var id = btn.getAttribute('data-id');
-    var endpoint = btn.getAttribute('data-endpoint') || '/keys/' + id + '/disable';
-    api(endpoint, { method: 'POST' })
-      .then(function() {
-        showToast('Disabled successfully');
-        if (typeof loadData === 'function') loadData();
-      })
-      .catch(function(err) {
-        showToast(err.message || 'Disable failed', 'error');
-      });
-  }
-});
