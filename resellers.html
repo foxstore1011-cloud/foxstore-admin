@@ -14,7 +14,6 @@
   <link rel="stylesheet" href="style.css">
   <style>
     .zoom-panel { margin-top: 16px; }
-    .zoom-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin-bottom: 14px; }
     .stat-pill {
       border-radius: 12px; padding: 12px 14px; border: 1px solid var(--border);
       background: var(--bg);
@@ -29,13 +28,7 @@
     .stat-pill.gold .val { color: #facc15; }
     .stat-pill.red { border-color: rgba(239,68,68,0.4); }
     .stat-pill.red .val { color: #f87171; }
-    .mini-table { width: 100%; font-size: 12px; border-collapse: collapse; }
-    .mini-table th, .mini-table td { padding: 6px 8px; border-bottom: 1px solid var(--border); text-align: left; }
-    .mini-table th { color: var(--muted); font-weight: 500; }
     .seller-card.selected { outline: 2px solid var(--primary); }
-  </style>
-
-  <style>
     .compact-zoom { max-width: 720px; margin: 0 auto 16px; }
     .compact-zoom .zoom-head { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:12px 14px; border-bottom:1px solid var(--border); }
     .compact-zoom .zoom-identity { display:flex; align-items:center; gap:10px; min-width:0; }
@@ -72,19 +65,6 @@
 
     requireAuth();
     document.addEventListener("auth-ready", function () {
-    // delegated-del: seller delete buttons (avoids broken inline onclick with special usernames)
-    document.addEventListener("click", function (ev) {
-      var t = ev.target;
-      if (!t || !t.closest) return;
-      var btn = t.closest(".btn-del-seller");
-      if (!btn) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      var id = btn.getAttribute("data-id");
-      var username = btn.getAttribute("data-username") || "";
-      if (id && typeof window.deleteReseller === "function") window.deleteReseller(id, username);
-    });
-
       if (!isManager()) {
         mountShell("Sellers");
         document.getElementById("page-content").innerHTML = '<div class="empty">Forbidden</div>';
@@ -132,7 +112,7 @@
         var roleClass = r.role === "superadmin" ? "seller-card--superadmin" : "seller-card--reseller";
         var active = r.isActive !== false;
         var avatar = (r.avatarUrl && String(r.avatarUrl).trim()) ? String(r.avatarUrl).trim() : DEFAULT_AVATAR;
-        var balBdt = r.balance != null ? Number(r.balance) : 0;
+        var balBdt = r.balance !== undefined && r.balance !== null ? Number(r.balance) : 0;
         var bal = formatMoney(balBdt, walletCurrency());
         var disc = r.discountPercent != null ? Number(r.discountPercent) : 0;
         var sel = selected.has(r.id);
@@ -157,9 +137,7 @@
             } else if (r.role === "superadmin") {
               actions += '<button class="btn btn-sm" type="button" style="color:#fbbf24" onclick="promoteSeller(\'' + esc(r.id) + '\',\'' + esc(r.username) + '\',\'reseller\')" title="Demote to Reseller">⬇ Reseller</button>';
             }
-          }
-          if (isRulerUser) {
-            actions += '<button class="btn btn-sm btn-danger btn-del-seller" type="button" data-id="' + esc(r.id) + '" data-username="' + esc(r.username) + '">Delete</button>';
+            actions += '<button class="btn btn-sm btn-danger" type="button" onclick="deleteReseller(\'' + esc(r.id) + '\',\'' + esc(r.username) + '\')">Delete</button>';
           }
         }
 
@@ -245,7 +223,6 @@
       } catch (e) { showToast(e.message, "error"); }
     }
 
-
     function closeZoom() {
       var zc = document.getElementById("zoomContainer");
       if (zc) zc.innerHTML = "";
@@ -265,31 +242,18 @@
         var d = res.data || {};
         var u = d.user || d;
         if (!u || !u.id) throw new Error("Seller not found");
-        var stats = d.stats || {
-          keyCount: (d.keys || []).length,
-          activeKeys: (d.keys || []).filter(function (k) { return k.status === "active"; }).length,
-          balance: Number(u.balance || 0)
-        };
+        var stats = d.stats || { keyCount: 0, activeKeys: 0, balance: 0 };
         var avatar = (u.avatarUrl && String(u.avatarUrl).trim()) ? u.avatarUrl : DEFAULT_AVATAR;
         var active = u.isActive !== false;
-        var bal = formatMoney(Number(u.balance || stats.balance || 0), "BDT");
+        var bal = formatMoney(Number(stats.balance || 0), "BDT");
 
         var PERM_LABELS = {
-          key_pause: "Pause",
-          key_resume: "Resume",
-          key_ban: "Ban",
-          key_unban: "Unban",
-          key_hwid_reset: "HWID reset",
-          key_unbind: "Unbind",
-          key_extend: "Extend",
-          key_reduce: "Reduce",
-          key_delete: "Delete key",
-          key_trial_create: "Trial create"
+          key_pause: "Pause", key_resume: "Resume", key_ban: "Ban", key_unban: "Unban",
+          key_hwid_reset: "HWID reset", key_unbind: "Unbind", key_extend: "Extend",
+          key_reduce: "Reduce", key_delete: "Delete key", key_trial_create: "Trial create"
         };
         var curPerms = (u.permissions && typeof u.permissions === "object") ? u.permissions : {};
-        if (typeof curPerms === "string") {
-          try { curPerms = JSON.parse(curPerms); } catch (e3) { curPerms = {}; }
-        }
+        if (typeof curPerms === "string") { try { curPerms = JSON.parse(curPerms); } catch (e3) { curPerms = {}; } }
 
         var permHtml = "";
         if (isRulerUser) {
@@ -299,97 +263,45 @@
             Object.keys(PERM_LABELS).map(function (k) {
               var on = curPerms[k] === true;
               return '<label class="perm-chip' + (on ? " on" : "") + '">' +
-                '<input type="checkbox" data-perm="' + k + '"' + (on ? " checked" : "") + '> ' +
-                esc(PERM_LABELS[k]) + '</label>';
+                '<input type="checkbox" data-perm="' + k + '"' + (on ? " checked" : "") + '> ' + esc(PERM_LABELS[k]) + '</label>';
             }).join("") +
-            '</div>' +
-            '<button class="btn btn-primary btn-sm" type="button" id="savePermBtn" style="margin-top:8px">Save permissions</button></div>';
+            '</div><button class="btn btn-primary btn-sm" type="button" id="savePermBtn" style="margin-top:8px">Save permissions</button></div>';
         }
 
         d.keys = d.keys || [];
-        d.transactions = d.transactions || [];
-        d.keyLogs = d.keyLogs || [];
-        d.audits = d.audits || [];
-
-        var keysHtml = !d.keys.length
-          ? '<div class="empty-mini">No keys</div>'
-          : '<div class="zoom-list">' + d.keys.slice(0, 30).map(function (k) {
-              return '<div class="zoom-row">' +
-                '<a class="mono" href="key.html?id=' + encodeURIComponent(k.id) + '">' + esc(k.key) + '</a>' +
-                '<span class="badge badge-' + esc(k.status || "active") + '">' + esc(k.status || "") + '</span>' +
-                '<span class="muted">' + esc(k.modDisplayName || k.modName || "") + '</span>' +
-                '<span class="muted">' + esc(String(k.deviceCount != null ? k.deviceCount : 0)) + '/' + esc(String(k.access != null ? k.access : "—")) + '</span>' +
-              '</div>';
-            }).join("") + (d.keys.length > 30 ? '<div class="muted">+' + (d.keys.length - 30) + ' more</div>' : '') + '</div>';
-
-        var txnHtml = !d.transactions.length
-          ? '<div class="empty-mini">No transactions</div>'
-          : '<div class="zoom-list">' + d.transactions.slice(0, 15).map(function (tx) {
-              var amt = Number(tx.amount);
-              var col = amt >= 0 ? "var(--success)" : "var(--danger)";
-              return '<div class="zoom-row">' +
-                '<span>' + esc(tx.type || "") + '</span>' +
-                '<span style="color:' + col + ';font-weight:600">' + (amt >= 0 ? "+" : "") + esc(String(amt)) + '</span>' +
-                '<span class="muted">' + esc(formatDate(tx.createdAt)) + '</span>' +
-              '</div>';
-            }).join("") + '</div>';
-
-        function compactLog(items) {
-          if (!items || !items.length) return '<div class="empty-mini">None</div>';
-          return '<div class="zoom-list">' + items.slice(0, 12).map(function (l) {
-            var action = l.action || l.type || "event";
-            var when = formatDate(l.createdAt || l.timestamp);
-            var detail = l.details;
-            if (detail && typeof detail === "object") {
-              try { detail = JSON.stringify(detail); } catch (e) { detail = String(detail); }
-            }
-            detail = detail ? String(detail).slice(0, 100) : "";
-            return '<div class="zoom-row log-row">' +
-              '<span class="log-act">' + esc(action) + '</span>' +
-              '<span class="muted">' + esc(when) + '</span>' +
-              (detail ? '<span class="muted detail">' + esc(detail) + '</span>' : '') +
-            '</div>';
-          }).join("") + '</div>';
-        }
+        var keysHtml = !d.keys.length ? '<div class="empty-mini">No keys</div>' :
+          '<div class="zoom-list">' + d.keys.slice(0, 30).map(function (k) {
+            return '<div class="zoom-row">' +
+              '<a class="mono" href="key.html?id=' + encodeURIComponent(k.id) + '">' + esc(k.key) + '</a>' +
+              '<span class="badge badge-' + esc(k.status || "active") + '">' + esc(k.status || "") + '</span>' +
+              '<span class="muted">' + esc(k.modName || "") + '</span></div>';
+          }).join("") + (d.keys.length > 30 ? '<div class="muted">+' + (d.keys.length - 30) + ' more</div>' : '') + '</div>';
 
         zc.innerHTML =
           '<div class="card zoom-panel compact-zoom">' +
             '<div class="zoom-head">' +
               '<div class="zoom-identity">' +
                 '<img class="seller-avatar" src="' + esc(avatar) + '" alt="" onerror="this.onerror=null;this.src=DEFAULT_AVATAR">' +
-                '<div>' +
-                  '<div class="seller-name"><span class="seller-status-dot ' + (active ? "on" : "off") + '"></span> ' + esc(u.username) + '</div>' +
-                  '<div class="muted" style="font-size:11px;text-transform:uppercase">' + esc(u.role || "") +
-                    (u.password ? ' · pass <code class="mono">' + esc(String(u.password)) + '</code>' : '') +
-                  '</div>' +
-                '</div>' +
+                '<div><div class="seller-name"><span class="seller-status-dot ' + (active ? "on" : "off") + '"></span> ' + esc(u.username) + '</div>' +
+                '<div class="muted" style="font-size:11px;text-transform:uppercase">' + esc(u.role || "") + '</div></div>' +
               '</div>' +
               '<button type="button" class="btn btn-sm" onclick="closeZoom()">Close</button>' +
             '</div>' +
             '<div class="card-body" style="padding-top:8px">' +
               '<div class="zoom-stats">' +
                 '<div class="stat-pill"><div class="lbl">Balance</div><div class="val">' + esc(bal) + '</div></div>' +
-                '<div class="stat-pill"><div class="lbl">Keys</div><div class="val">' + esc(String(stats.keyCount || d.keys.length || 0)) + '</div></div>' +
+                '<div class="stat-pill"><div class="lbl">Keys</div><div class="val">' + esc(String(stats.keyCount || 0)) + '</div></div>' +
                 '<div class="stat-pill green"><div class="lbl">Active</div><div class="val">' + esc(String(stats.activeKeys || 0)) + '</div></div>' +
                 '<div class="stat-pill"><div class="lbl">Login</div><div class="val" style="font-size:12px">' + esc(formatDate(u.lastLoginAt)) + '</div></div>' +
               '</div>' +
               '<div class="zoom-actions">' +
                 '<button class="btn btn-sm" type="button" style="color:var(--success)" onclick="rechargeReseller(\'' + esc(u.id) + '\',\'' + esc(u.username) + '\')">+ Balance</button>' +
-                '<button class="btn btn-sm" type="button" onclick="toggleActive(\'' + esc(u.id) + '\',' + (active ? "false" : "true") + ',\'' + esc(u.username) + '\')">' +
-                  (active ? "Disable" : "Activate") + '</button>' +
-                (isRulerUser
-                  ? '<button class="btn btn-sm" type="button" onclick="editBalance(\'' + esc(u.id) + '\',\'' + esc(u.username) + '\',' + Number(u.balance || 0) + ')">Edit bal</button>' +
-                    '<button class="btn btn-sm" type="button" onclick="setDiscount(\'' + esc(u.id) + '\',\'' + esc(u.username) + '\',' + Number(u.discountPercent || 0) + ')">Disc%</button>'
-                  : '') +
-                '<button class="btn btn-sm btn-danger btn-del-seller" type="button" data-id="' + esc(u.id) + '" data-username="' + esc(u.username) + '">Delete</button>' +
+                '<button class="btn btn-sm" type="button" onclick="toggleActive(\'' + esc(u.id) + '\',' + (active ? "false" : "true") + ',\'' + esc(u.username) + '\')">' + (active ? "Disable" : "Activate") + '</button>' +
+                (isRulerUser ? '<button class="btn btn-sm btn-danger" type="button" onclick="deleteReseller(\'' + esc(u.id) + '\',\'' + esc(u.username) + '\')">Delete</button>' : '') +
               '</div>' +
               permHtml +
               '<div class="zoom-section"><div class="zoom-sec-title">Keys</div>' + keysHtml + '</div>' +
-              '<div class="zoom-section"><div class="zoom-sec-title">Wallet</div>' + txnHtml + '</div>' +
-              '<div class="zoom-section"><div class="zoom-sec-title">Key logs</div>' + compactLog(d.keyLogs) + '</div>' +
-              '<div class="zoom-section"><div class="zoom-sec-title">Audit</div>' + compactLog(d.audits) + '</div>' +
-            '</div>' +
-          '</div>';
+            '</div></div>';
 
         var saveBtn = document.getElementById("savePermBtn");
         if (saveBtn) {
@@ -406,9 +318,7 @@
           };
         }
       } catch (e) {
-        zc.innerHTML = '<div class="card zoom-panel compact-zoom"><div class="card-body" style="color:var(--danger)">' +
-          esc(e.message || String(e)) +
-          ' <button class="btn btn-sm" type="button" onclick="closeZoom()">Close</button></div></div>';
+        zc.innerHTML = '<div class="card zoom-panel compact-zoom"><div class="card-body" style="color:var(--danger)">' + esc(e.message || String(e)) + ' <button class="btn btn-sm" type="button" onclick="closeZoom()">Close</button></div></div>';
       }
     }
 
@@ -418,14 +328,12 @@
           '<form id="createForm">' +
             '<div class="form-row">' +
               '<div class="form-group"><label>Username</label><input type="text" id="newUsername" required></div>' +
-              '<div class="form-group"><label>Password <span style="color:var(--muted);font-weight:400">(min 4)</span></label><input type="password" id="newPassword" required minlength="4" placeholder="Min 4 characters"></div>' +
+              '<div class="form-group"><label>Password</label><input type="password" id="newPassword" required minlength="4" placeholder="Min 4 characters"></div>' +
               '<div class="form-group"><label>Profile image URL</label><input type="url" id="newAvatar" placeholder="https://..."></div>' +
             '</div>' +
             '<button type="submit" class="btn btn-primary">Create</button> ' +
             '<button type="button" class="btn" onclick="document.getElementById(\'formContainer\').innerHTML=\'\'">Cancel</button>' +
           '</form></div></div>';
-      bindPasswordToggles(document.getElementById("formContainer"));
-      bindPasswordStrength(document.getElementById("formContainer"));
       document.getElementById("createForm").addEventListener("submit", async function (e) {
         e.preventDefault();
         try {
@@ -442,27 +350,23 @@
     }
 
     async function rechargeReseller(id, username) {
-      var unitAns = prompt("Add balance for " + username + "\n\nUnit:\n  1 = Taka (৳)\n  2 = Credit (100৳ = 1 cr)\n\nEnter 1 or 2:", "1");
-      if (unitAns === null) return;
-      var unit = (String(unitAns).trim() === "2") ? "CREDIT" : "BDT";
-      var amount = prompt((unit === "CREDIT" ? "Credits to add:" : "Taka (৳) to add:") + "\n(Superadmin pays from own wallet)");
+      var amount = prompt("Add balance (৳) for " + username + ":");
       if (amount === null || amount === "") return;
       var amt = parseFloat(amount);
       if (!amt || amt <= 0) { showToast("Invalid amount", "error"); return; }
       try {
-        var res = await api("/resellers/" + id + "/recharge", { method: "POST", body: { amount: amt, unit: unit } });
+        var res = await api("/resellers/" + id + "/recharge", { method: "POST", body: { amount: amt } });
         showToast("Recharged → " + formatMoney(res.data.balance, "BDT"));
-        try { var me = await api("/auth/me"); if (me.wallet) window.__wallet = me.wallet; } catch (e) {}
         loadResellers();
       } catch (e) { showToast(e.message, "error"); }
     }
 
     async function setDiscount(id, username, current) {
-      if (typeof isRuler === "function" && !isRuler()) { showToast("Ruler only", "error"); return; }
-      var v = prompt("Discount % for " + username + " (0–100)\nApplied on key purchase charge.\nCurrent: " + (current != null ? current : 0) + "%", String(current != null ? current : 0));
+      if (!isRulerUser) { showToast("Ruler only", "error"); return; }
+      var v = prompt("Discount % for " + username + " (0-100)\nCurrent: " + (current != null ? current : 0) + "%", String(current != null ? current : 0));
       if (v === null) return;
       var d = parseFloat(v);
-      if (isNaN(d) || d < 0 || d > 100) { showToast("Must be 0–100", "error"); return; }
+      if (isNaN(d) || d < 0 || d > 100) { showToast("Must be 0-100", "error"); return; }
       try {
         await api("/resellers/" + id + "/set-discount", { method: "POST", body: { discountPercent: d } });
         showToast("Discount set to " + d + "%");
@@ -476,29 +380,16 @@
         var r = res.data;
         document.getElementById("formContainer").innerHTML =
           '<div class="card"><div class="card-header"><h2>Edit: ' + esc(r.username) + '</h2></div><div class="card-body">' +
-            '<div style="font-size:13px;margin-bottom:14px;color:var(--muted)">' +
-              'Role: <strong style="color:var(--fg)">' + esc(r.role) + '</strong> · ' +
-              'Status: <strong style="color:' + (r.isActive !== false ? "var(--success)" : "var(--danger)") + '">' + (r.isActive !== false ? "Active" : "Disabled") + '</strong> · ' +
-              'Balance: <strong style="color:#facc15">৳' + esc(String(r.balance != null ? Number(r.balance).toFixed(0) : 0)) + '</strong><br>' +
-              'Created: ' + esc(formatDate(r.createdAt)) + ' · Last login: ' + esc(formatDate(r.lastLoginAt)) +
-            '</div>' +
             '<form id="editForm">' +
               '<div class="form-group"><label>Username</label><input type="text" id="editUsername" value="' + esc(r.username) + '"></div>' +
-              '<div class="form-group"><label>Password <span style="color:var(--muted);font-weight:400">(min 4 · plaintext)</span></label>' +
-                '<input type="password" id="editPassword" data-pw-toggle value="' + esc(r.password || "") + '" autocomplete="off" minlength="4">' +
-                '<div class="hint">👁 show · strength bar Weak→Secure · min 4 chars</div></div>' +
-              '<div class="form-group"><label>Profile image URL</label>' +
-                '<input type="url" id="editAvatar" value="' + esc(r.avatarUrl || "") + '" placeholder="https://...">' +
-                (r.avatarUrl ? '<div style="margin-top:8px"><img src="' + esc(r.avatarUrl) + '" style="width:40px;height:40px;border-radius:50%;object-fit:cover;border:1px solid var(--border)" onerror="this.style.display=\'none\'"></div>' : '') +
-              '</div>' +
+              '<div class="form-group"><label>Password</label><input type="password" id="editPassword" value="" placeholder="Leave blank to keep" minlength="4"></div>' +
+              '<div class="form-group"><label>Profile image URL</label><input type="url" id="editAvatar" value="' + esc(r.avatarUrl || "") + '"></div>' +
               '<div class="form-group"><label>Active</label><select id="editActive">' +
                 '<option value="true"' + (r.isActive !== false ? " selected" : "") + '>Active</option>' +
                 '<option value="false"' + (r.isActive === false ? " selected" : "") + '>Disabled</option></select></div>' +
               '<button type="submit" class="btn btn-primary">Save</button> ' +
               '<button type="button" class="btn" onclick="document.getElementById(\'formContainer\').innerHTML=\'\'">Cancel</button>' +
             '</form></div></div>';
-        bindPasswordToggles(document.getElementById("formContainer"));
-        bindPasswordStrength(document.getElementById("formContainer"));
         document.getElementById("editForm").addEventListener("submit", async function (e) {
           e.preventDefault();
           var body = {
@@ -507,7 +398,7 @@
             avatarUrl: document.getElementById("editAvatar").value.trim()
           };
           var pass = document.getElementById("editPassword").value;
-          if (pass) body.password = pass; // plaintext save
+          if (pass) body.password = pass;
           try {
             await api("/resellers/" + id, { method: "PATCH", body: body });
             showToast("Saved");
@@ -515,11 +406,9 @@
             loadResellers();
           } catch (err) { showToast(err.message, "error"); }
         });
-        window.scrollTo({ top: 0, behavior: "smooth" });
       } catch (e) { showToast(e.message, "error"); }
     }
 
-    
     async function promoteSeller(id, username, role) {
       if (!isRulerUser) return;
       var label = role === "superadmin" ? "promote " + username + " to Superadmin?" : "demote " + username + " to Reseller?";
@@ -528,15 +417,12 @@
         await api("/resellers/" + encodeURIComponent(id), { method: "PATCH", body: { role: role } });
         showToast(role === "superadmin" ? "Promoted to Superadmin" : "Demoted to Reseller");
         loadResellers();
-      } catch (e) {
-        showToast(e.message || String(e), "error");
-      }
+      } catch (e) { showToast(e.message || String(e), "error"); }
     }
 
     window.loadResellers = loadResellers;
     window.showCreateForm = showCreateForm;
     window.toggleSelectAll = toggleSelectAll;
-    window.bulkSetActive = bulkSetActive;
     window.toggleActive = toggleActive;
     window.editBalance = editBalance;
     window.setDiscount = setDiscount;
@@ -548,11 +434,11 @@
     window.deleteReseller = async function deleteReseller(id, username) {
       if (!id) { showToast("Missing seller id", "error"); return; }
       var label = username || id;
-      if (!confirm("HARD DELETE " + label + " and ALL their keys permanently? This cannot be undone.")) return;
+      if (!confirm("HARD DELETE " + label + " and ALL their keys permanently?")) return;
       showToast("Deleting " + label + "…");
       try {
         var r = await api("/resellers/" + encodeURIComponent(id), { method: "DELETE" });
-        showToast(label + " deleted" + (r.keysRemoved != null ? (" · " + r.keysRemoved + " keys") : ""), "success");
+        showToast(label + " deleted", "success");
         try { closeZoom(); } catch (e2) {}
         loadResellers();
       } catch (e) {
